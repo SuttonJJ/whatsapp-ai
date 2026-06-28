@@ -1,10 +1,21 @@
-const path = require('path');
-const MessagingResponse = require('twilio').twiml.MessagingResponse;
-require('dotenv').config({path: path.resolve(__dirname, '../.env')});
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+import express from 'express';
+import twilio from 'twilio';
+import { Ollama } from 'ollama';
 
-const express = require('express');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+const { twiml: { MessagingResponse } } = twilio;
+
 const app = express();
 const port = 3000;
+const sessions = {};
+const ollama = new Ollama();
 
 app.use(express.urlencoded());
 
@@ -13,7 +24,37 @@ app.get('/test', (req,res) => {
 });
 
 // Twilio Stuff
-const sessions = {};
+app.post('/webhookai', async (req, res) => {
+    // Twilio response setup
+    const response = new MessagingResponse();
+    const message = response.message();
+    res.type('text/xml');
+
+    // Variables
+    let num = req.body.From;
+
+    if (!sessions[num]) {
+        sessions[num] = {
+            step: 0,
+            name: null,
+            product: null,
+            area: null,
+            messages: []
+        }
+    }
+
+    sessions[num].messages.push({role: 'user', content: req.body.Body});
+
+    const aiResponse = await ollama.chat({
+        model: 'llama3.1',
+        messages: sessions[num].messages
+    });
+    message.body(aiResponse.message.content)
+    sessions[num].messages.push(aiResponse.message);
+
+    res.send(response.toString());
+});
+
 
 app.post('/webhook', (req, res) => {
 

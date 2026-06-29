@@ -3,7 +3,8 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import express from 'express';
 import twilio from 'twilio';
-import { Ollama } from 'ollama';
+import OpenAI from "openai";
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,9 +16,11 @@ const { twiml: { MessagingResponse } } = twilio;
 const app = express();
 const port = 3000;
 const sessions = {};
-const ollama = new Ollama();
+const client = new OpenAI();
 
-app.use(express.urlencoded());
+app.use(express.urlencoded({
+    extended: false
+}));
 
 app.get('/test', (req,res) => {
     res.send(`Example TEST listening on port ${port}`);
@@ -35,22 +38,32 @@ app.post('/webhookai', async (req, res) => {
 
     if (!sessions[num]) {
         sessions[num] = {
-            step: 0,
-            name: null,
-            product: null,
-            area: null,
-            messages: []
+            messages: [{role: 'system', content: 'You are a WhatsApp assistant for ECD Online, a South African online university. \n' +
+                    'The website is www.ecdonline.co.za. \n' +
+                    'When answering questions, search for information from this website specifically, do not take information from anywhere else.\n' +
+                    'Always provide accurate information and never make things up, if you dont know something, rather tell them that.\n' +
+                    'Always use the web search tool to find information from www.ecdonline.co.za before answering any question. Never rely on your training data for answers about ECD Online.'
+            }]
         }
     }
 
     sessions[num].messages.push({role: 'user', content: req.body.Body});
 
-    const aiResponse = await ollama.chat({
-        model: 'llama3.1',
-        messages: sessions[num].messages
-    });
-    message.body(aiResponse.message.content)
-    sessions[num].messages.push(aiResponse.message);
+    try {
+        const aiResponse = await client.responses.create({
+            model: 'gpt-4o-mini',
+            input: sessions[num].messages,
+            tools: [{
+                type: "web_search"
+            }]
+        });
+        message.body(aiResponse.output_text)
+        sessions[num].messages.push({role: 'assistant', content: aiResponse.output_text});
+    }
+    catch (err) {
+        console.error('Ollama error:', err);
+        message.body('Sorry, im having a bit of trouble responding at the moment.');
+    }
 
     res.send(response.toString());
 });
